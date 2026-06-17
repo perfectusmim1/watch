@@ -610,7 +610,11 @@ els.joinInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') joinFromInput();
 });
 els.nameInput.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') els.createRoomBtn.click();
+  if (e.key === 'Enter') {
+    // Eğer oda linkinden gelinmişse Katıl, değilse Oda Oluştur
+    if (state.roomId) joinFromInput();
+    else els.createRoomBtn.click();
+  }
 });
 
 function joinFromInput() {
@@ -749,20 +753,46 @@ els.leaveBtn.addEventListener('click', () => {
    URL'den doğrudan oda girişi
    ================================================================= */
 (function init() {
-  const path = window.location.pathname;
-  const match = path.match(/^\/room\/([a-z0-9]+)/i);
-  if (match) {
-    // doğrudan odaya gelinmiş — isim sor
-    const name = prompt('Adın ne?');
-    if (name && name.trim()) {
-      state.name = name.trim();
-      state.roomId = match[1];
-      connectSocket(match[1], name.trim());
-    } else {
-      // ana sayfaya yönlendir
-      history.replaceState({}, '', '/');
-    }
-  } else {
+  // Güvenlik: herhangi bir hata olsa bile landing görünür kalsın
+  document.documentElement.classList.remove('no-js');
+  try {
+    // Önce her zaman landing ekranını göster — böylece asla boş ekran kalmaz
     showScreen('landing');
+  } catch (e) {
+    console.error('[init] showScreen hatası:', e);
+    document.getElementById('landing').classList.add('active');
+  }
+
+  try {
+    const path = window.location.pathname;
+    const match = path.match(/^\/room\/([a-z0-9]+)/i);
+    if (match) {
+      // Direkt oda linkiyle gelinmiş — landing'i "bu odaya katıl" moduna çevir
+      state.roomId = match[1];
+      // Oda kodunu join alanına önden doldur ve bilgilendirme göster
+      els.joinInput.value = match[1];
+      els.joinInput.disabled = true;
+      els.joinInput.style.opacity = '0.6';
+
+      // Üst bilgi: hangi odaya katılacağı
+      let info = document.getElementById('joinInfo');
+      if (!info) {
+        info = document.createElement('div');
+        info.id = 'joinInfo';
+        info.className = 'error-msg';
+        info.style.background = 'rgba(59, 130, 246, 0.1)';
+        info.style.borderColor = 'rgba(59, 130, 246, 0.3)';
+        info.style.color = '#60a5fa';
+        info.style.animation = 'none';
+        info.style.display = 'block';
+        els.landingError.parentElement.appendChild(info);
+      }
+      info.textContent = `🔗 "${match[1]}" odasına katılıyorsun. Adını gir ve Katıl'a bas.`;
+
+      // İsim alanına odaklan
+      setTimeout(() => { try { els.nameInput.focus(); } catch(_){} }, 100);
+    }
+  } catch (e) {
+    console.error('[init] oda linki işlenirken hata:', e);
   }
 })();

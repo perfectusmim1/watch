@@ -87,6 +87,13 @@ input, select {
   pointer-events: auto;
 }
 
+/* Güvenlik ağı: JS kapalı/hata verirse bile landing görünür kalsın.
+   no-js sınıfı HTML'e başlangıçta eklenir, JS çalışınca kaldırılır. */
+html.no-js #landing {
+  opacity: 1 !important;
+  pointer-events: auto !important;
+}
+
 /* =================================================================
    LANDING (ana sayfa)
    ================================================================= */
