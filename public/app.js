@@ -63,27 +63,15 @@ const state = {
   idleTimer: null,
 };
 
-/* ---------- Kaynaklar (fallback sırasıyla) ----------
+/* ---------- Kaynaklar ----------
    TRT CDN tarayıcıdan direkt erişime açık (CORS: *).
-   1) TRT ana CDN (düşük gecikme)
-   2) Yedek TRT CDN
-   3) Server-side proxy (geo-block olmayan ortamda yedek)
-
-   Not: localhost'ta proxy önceliklidir (en güvenilir); canlı deployda
-   direkt TRT kaynakları önceliklidir (Railway yurt dışı IP'yi engeller).
+   Her ortamda (localhost dahil) direkt TRT kullanıyoruz — proxy devre dışı.
+   Bu, segment path çözümleme sorunlarını ortadan kaldırır ve gecikmeyi azaltır.
 */
-const isLocal = /^(localhost|127\.0\.0\.1)/.test(location.hostname);
-const STREAM_SOURCES = isLocal
-  ? [
-      '/stream/master.m3u8',                                  // yerel proxy — senin PC'n TRT'ye erişir
-      'https://tv-trt1.medya.trt.com.tr/master.m3u8',         // direkt yedek
-      'https://trt-daioncdn.mb3x.com/trt-1/master.m3u8',      // alternatif CDN
-    ]
-  : [
-      'https://tv-trt1.medya.trt.com.tr/master.m3u8',         // direkt — tarayıcıdan (TR CORS açık)
-      'https://trt-daioncdn.mb3x.com/trt-1/master.m3u8',      // alternatif CDN
-      '/stream/master.m3u8',                                  // proxy son çare (deployda 403 olabilir)
-    ];
+const STREAM_SOURCES = [
+  'https://tv-trt1.medya.trt.com.tr/master.m3u8',         // TRT ana CDN (CORS açık)
+  'https://trt-daioncdn.mb3x.com/trt-1/master.m3u8',      // yedek CDN
+];
 let currentSourceIndex = 0;
 
 /* =================================================================
@@ -153,15 +141,18 @@ function setupHls() {
     loadSource(hls);
 
     hls.on(Hls.Events.MANIFEST_PARSED, () => {
+      console.log('[hls] manifest yüklendi, seviye sayısı:', hls.levels.length);
       fillQualityOptions(hls);
+      // Canlı uca otomatik git
+      if (hls.liveSyncPosition) {
+        els.video.currentTime = hls.liveSyncPosition;
+      }
       // canlı yayında otomatik oynat
-      els.video.muted = true; // autoplay politikası için başlangıçta sessiz
-      els.video.play().then(() => {
-        // sesi açmayı dene; tarayıcı izin vermezse sessiz kalır
-        unmuteInitial();
-      }).catch(() => {
-        // otomatik oynatma engellendi; kullanıcı etkileşimi beklenir
-      });
+      tryStartPlayback();
+    });
+
+    hls.on(Hls.Events.FRAG_LOADED, () => {
+      // segment geldi → loader'ı kesin gizle
       hideLoader();
       enableControls(true);
     });
@@ -244,6 +235,55 @@ function unmuteInitial() {
     els.video.volume = vol;
     updateMuteIcon();
   } catch (_) {}
+}
+
+/* Oynatmayı başlat — autoplay engelini robust şekilde ele alır.
+   Tarayıcılar sessiz oynatmaya izin verir; sesi kullanıcı etkileşimiyle açarız. */
+function tryStartPlayback() {
+  // Başlangıçta sessiz (autoplay politikası) — sesi kullanıcı açacak
+  els.video.muted = true;
+  els.video.volume = 0;
+  const p = els.video.play();
+  if (p && typeof p.then === 'function') {
+    p.then(() => {
+      console.log('[hls] oynatma başladı (sessiz)');
+      hideLoader();
+    }).catch((err) => {
+      console.warn('[hls] otomatik oynatma engellendi:', err.name);
+      // Kullanıcı ilk etkileşimde (tıklama) başlat
+      showPlayOverlay();
+    });
+  }
+}
+
+/* Autoplay engellenince video üzerinde tıklanabilir bir katman göster */
+function showPlayOverlay() {
+  let overlay = document.getElementById('playOverlay');
+  if (overlay) return;
+  overlay = document.createElement('div');
+  overlay.id = 'playOverlay';
+  overlay.style.cssText = [
+    'position:absolute', 'inset:0', 'display:grid', 'place-items:center',
+    'background:rgba(0,0,0,0.5)', 'cursor:pointer', 'z-index:6',
+    'transition:opacity .3s', 'border-radius:inherit',
+  ].join(';');
+  overlay.innerHTML =
+    '<div style="display:flex;flex-direction:column;align-items:center;gap:14px;color:#fff">' +
+    '<div style="width:76px;height:76px;border-radius:50%;background:#3b82f6;display:grid;place-items:center;box-shadow:0 8px 30px rgba(59,130,246,.5)">' +
+    '<svg viewBox="0 0 24 24" width="34" height="34" fill="#fff"><path d="M8 5v14l11-7z"/></svg></div>' +
+    '<span style="font-size:15px;font-weight:600">Yayını başlatmak için tıkla</span></div>';
+  els.video.parentElement.appendChild(overlay);
+  const start = () => {
+    overlay.style.opacity = '0';
+    setTimeout(() => overlay.remove(), 300);
+    els.video.muted = true;
+    els.video.play().then(() => {
+      hideLoader();
+      // kısa gecikmeyle sesi açmayı dene
+      setTimeout(unmuteInitial, 200);
+    }).catch(() => {});
+  };
+  overlay.addEventListener('click', start, { once: true });
 }
 
 function hideLoader() {
