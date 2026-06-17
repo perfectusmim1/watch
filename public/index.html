@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>WatchFriend — Birlikte İzle</title>
   <link rel="preconnect" href="https://cdn.jsdelivr.net" />
-  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="/styles.css" />
   <!-- JS çalışır çalışmaz no-js sınıfını kaldır -->
   <script>document.documentElement.classList.remove('no-js');</script>
 </head>
@@ -91,7 +91,20 @@
           <!-- Yükleniyor göstergesi -->
           <div class="loader" id="loader">
             <div class="spinner"></div>
-            <span>Yayın yükleniyor…</span>
+            <span id="loaderText">Yayın yükleniyor…</span>
+          </div>
+
+          <!-- Yayın yüklenemedi paneli (tekrar dene butonlu) -->
+          <div class="overlay-msg hidden" id="streamError" style="flex-direction:column;gap:14px">
+            <svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="#ef4444" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="10"/>
+              <path d="M12 8v4M12 16h.01"/>
+            </svg>
+            <span style="font-size:15px;font-weight:600;color:#fff">Yayın yüklenemedi</span>
+            <span id="streamErrorDetail" style="font-size:13px;color:rgba(255,255,255,.7);text-align:center;max-width:340px"></span>
+            <div style="display:flex;gap:10px;margin-top:4px">
+              <button id="retryBtn" class="btn-primary" style="padding:8px 18px;font-size:14px">Tekrar Dene</button>
+            </div>
           </div>
 
           <!-- Bağlantı kuruluyor -->
@@ -192,6 +205,6 @@
   <!-- HLS.js (m3u8 oynatma) + Socket.IO (gerçek zamanlı) -->
   <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.13/dist/hls.min.js"></script>
   <script src="/socket.io/socket.io.js"></script>
-  <script src="app.js"></script>
+  <script src="/app.js"></script>
 </body>
 </html>

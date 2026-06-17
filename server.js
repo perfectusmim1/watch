@@ -75,6 +75,7 @@ app.get('/stream/*', (clientReq, clientRes) => {
   const url = new URL(targetUrl);
   const lib = url.protocol === 'https:' ? https : http;
 
+  // Timeout güvenliği: CDN cevap vermezse istemci sonsuza kadar beklemesin
   const upstreamReq = lib.get(
     url,
     {
@@ -85,6 +86,7 @@ app.get('/stream/*', (clientReq, clientRes) => {
         Referer: 'https://www.trt1.com.tr/',
         Origin: 'https://www.trt1.com.tr',
       },
+      timeout: 15000, // 15 sn — bağlantı/cevap için makul sınır
     },
     (upstreamRes) => {
       // 3xx ise location'u proxy'ye rewrite et
@@ -93,11 +95,23 @@ app.get('/stream/*', (clientReq, clientRes) => {
         upstreamRes.statusCode < 400 &&
         upstreamRes.headers.location
       ) {
-        clientRes.redirect(302, `/stream/${upstreamRes.headers.location}`);
+        const loc = upstreamRes.headers.location;
+        // Mutlak URL ise aynı CDN demektir → host bilgisinden relative path üret
+        let rel = loc;
+        try {
+          if (/^https?:\/\//i.test(loc)) {
+            rel = new URL(loc).pathname.replace(/^\/+/, '');
+          } else {
+            rel = loc.replace(/^\/+/, '');
+          }
+        } catch (_) {
+          rel = loc.replace(/^\/+/, '');
+        }
+        clientRes.redirect(302, `/stream/${rel}`);
         return;
       }
 
-      if (upstreamRes.statusCode !== 200) {
+      if (upstreamRes.statusCode !== 200 && upstreamRes.statusCode !== 206) {
         clientRes.status(upstreamRes.statusCode || 502).end();
         return;
       }
@@ -138,6 +152,14 @@ app.get('/stream/*', (clientReq, clientRes) => {
   upstreamReq.on('error', (err) => {
     console.error('[proxy] hata:', err.message);
     if (!clientRes.headersSent) clientRes.status(502).end('Stream proxy error');
+    else clientRes.end();
+  });
+
+  // Bağlantı kuruldu ama cevap geç gelirse → zaman aşımı ile sonlandır
+  upstreamReq.on('timeout', () => {
+    console.error('[proxy] zaman aşımı:', targetUrl);
+    upstreamReq.destroy();
+    if (!clientRes.headersSent) clientRes.status(504).end('Stream proxy timeout');
     else clientRes.end();
   });
 });

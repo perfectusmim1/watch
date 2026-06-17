@@ -26,6 +26,10 @@ const els = {
   // player
   video: $('video'),
   loader: $('loader'),
+  loaderText: $('loaderText'),
+  streamError: $('streamError'),
+  streamErrorDetail: $('streamErrorDetail'),
+  retryBtn: $('retryBtn'),
   connectingMsg: $('connectingMsg'),
   controls: $('controls'),
   playPauseBtn: $('playPauseBtn'),
@@ -64,15 +68,73 @@ const state = {
 };
 
 /* ---------- Kaynaklar ----------
-   TRT CDN tarayıcıdan direkt erişime açık (CORS: *).
-   Her ortamda (localhost dahil) direkt TRT kullanıyoruz — proxy devre dışı.
-   Bu, segment path çözümleme sorunlarını ortadan kaldırır ve gecikmeyi azaltır.
+   iptv-org'un resmi TRT1 kaynağı (1080p onaylı):
+     https://tv-trt1.medya.trt.com.tr/master.m3u8
+   CORS'u tamamen açık (Access-Control-Allow-Origin: *), test edilmiştir.
+   Sıralama: en güvenilir → yedek. Yedek proxy deploy ortamlarında devreye girer.
 */
 const STREAM_SOURCES = [
-  'https://tv-trt1.medya.trt.com.tr/master.m3u8',         // TRT ana CDN (CORS açık)
-  'https://trt-daioncdn.mb3x.com/trt-1/master.m3u8',      // yedek CDN
+  'https://tv-trt1.medya.trt.com.tr/master.m3u8',         // iptv-org resmi (CORS *, en güvenilir)
+  '/stream/master.m3u8',                                  // Kendi proxy'miz (deploy + CORS yedeği)
 ];
 let currentSourceIndex = 0;
+let retryCount = 0; // tüm kaynaklar tükendikçe artar, sonsuz döngüyü önler
+
+/* ---------- Loader / Hata paneli ---------- */
+let loaderWatchdog = null;
+
+function setLoaderText(msg) {
+  if (els.loaderText) els.loaderText.textContent = msg;
+}
+
+function showStreamError(detail) {
+  if (!els.streamError) return;
+  setLoaderText('Yayın yükleniyor…');
+  els.loader.classList.add('hidden');
+  clearLoaderWatchdog();
+  if (els.streamErrorDetail) els.streamErrorDetail.textContent = detail || '';
+  els.streamError.classList.remove('hidden');
+}
+
+function hideStreamError() {
+  if (els.streamError) els.streamError.classList.add('hidden');
+}
+
+/* Loader için güvenlik ağı: belli süre sonra gerçekten bir şey gösterilmiyorsa
+   kaynakları sırayla deneyecek veya kullanıcıyı bilgilendirecek. */
+function startLoaderWatchdog() {
+  clearTimeout(loaderWatchdog);
+  loaderWatchdog = setTimeout(() => {
+    // Hâlâ görünüyorsa ve video oynamıyorsa — bir sonraki kaynağa geç
+    if (!els.loader.classList.contains('hidden') && els.video.readyState < 3) {
+      if (currentSourceIndex < STREAM_SOURCES.length - 1) {
+        currentSourceIndex++;
+        retryCount = 0;
+        console.log('[watchdog] kaynak yenileniyor →', STREAM_SOURCES[currentSourceIndex]);
+        setLoaderText('Kaynak değiştiriliyor…');
+        try { state.hls.destroy(); } catch (_) {}
+        setTimeout(() => setupHls(), 400);
+      } else if (retryCount < 2) {
+        // Tüm kaynaklar bir kez daha denensin
+        retryCount++;
+        currentSourceIndex = 0;
+        setLoaderText('Yeniden deneniyor (' + retryCount + '/2)…');
+        try { state.hls.destroy(); } catch (_) {}
+        setTimeout(() => setupHls(), 600);
+      } else {
+        // Tüm seçenekler tükendi → kullanıcıya net mesaj göster
+        showStreamError(
+          'TRT1 kaynağına şu an ulaşılamıyor. İnternet bağlantını kontrol et ' +
+          'veya birkaç dakika sonra tekrar dene.'
+        );
+      }
+    }
+  }, 14000); // 14 saniye — makul bir süre
+}
+function clearLoaderWatchdog() {
+  clearTimeout(loaderWatchdog);
+  loaderWatchdog = null;
+}
 
 /* =================================================================
    Yardımcılar
@@ -123,25 +185,47 @@ function setupHls() {
   if (els.loader) {
     els.loader.classList.remove('hidden');
   }
+  hideStreamError();
+  setLoaderText('Yayın yükleniyor…');
+  startLoaderWatchdog();
 
   if (window.Hls && Hls.isSupported()) {
+    // Config StreamVault ile birebir aynı (TRT1'i sorunsuz oynatan referans uygulama)
     const hls = new Hls({
       enableWorker: true,
-      lowLatencyMode: true,           // düşük gecikme modu (canlı için)
-      backBufferLength: 30,
-      // canlı uçtakı oynatmayı tercih et
-      liveSyncDurationCount: 3,
-      liveMaxLatencyDurationCount: 6,
-      maxBufferLength: 20,
+      lowLatencyMode: true,
+      backBufferLength: 90,
+      maxBufferLength: 30,
+      maxMaxBufferLength: 60,
+      startLevel: -1,
+      capLevelToPlayerSize: true,
     });
     state.hls = hls;
 
+    // --- Video elementini HLS'e BAĞLA (KRİTİK: bu olmadan segmentler MSE'ye yazılamaz) ---
+    hls.attachMedia(els.video);
+
     // İlk kaynaktan başla
-    currentSourceIndex = 0;
     loadSource(hls);
+
+    // --- Detaylı segment yükleme logları (debug için) ---
+    hls.on(Hls.Events.FRAG_LOADING, (_e, d) => {
+      console.log('[hls] segment yükleniyor:', d && d.frag && d.frag.url);
+    });
+    hls.on(Hls.Events.FRAG_LOADED, (_e, d) => {
+      console.log('[hls] segment geldi:', d && d.frag && d.frag.sn, '→ loader gizleniyor');
+      // segment geldi → loader'ı kesin gizle
+      hideLoader();
+      clearLoaderWatchdog();
+      enableControls(true);
+    });
+    hls.on(Hls.Events.FRAG_PARSING_ERROR, (_e, d) => {
+      console.warn('[hls] segment parse hatası:', d && d.details);
+    });
 
     hls.on(Hls.Events.MANIFEST_PARSED, () => {
       console.log('[hls] manifest yüklendi, seviye sayısı:', hls.levels.length);
+      setLoaderText('Görüntü hazırlanıyor…');
       fillQualityOptions(hls);
       // Canlı uca otomatik git
       if (hls.liveSyncPosition) {
@@ -151,9 +235,17 @@ function setupHls() {
       tryStartPlayback();
     });
 
-    hls.on(Hls.Events.FRAG_LOADED, () => {
-      // segment geldi → loader'ı kesin gizle
+    // Ek güvenlik ağı: buffer dolduğunda da loader'ı gizle (FRAG_LOADED bazen geç gelir)
+    hls.on(Hls.Events.BUFFER_APPENDED, () => {
+      console.log('[hls] buffer doldu → loader gizleniyor');
       hideLoader();
+      clearLoaderWatchdog();
+      enableControls(true);
+    });
+
+    // Manifest yüklendi ama yine de ilerlemezse — yine loader'ı gizle, video hazır olabilir
+    hls.on(Hls.Events.BUFFER_CREATED, () => {
+      console.log('[hls] buffer oluşturuldu');
       enableControls(true);
     });
 
@@ -164,7 +256,10 @@ function setupHls() {
     });
 
     hls.on(Hls.Events.ERROR, (_evt, data) => {
-      console.warn('[hls] hata:', data.type, data.details, 'kaynak:', STREAM_SOURCES[currentSourceIndex]);
+      console.warn('[hls] hata:', data.type, data.details, '| fatal:', data.fatal, '| kaynak:', STREAM_SOURCES[currentSourceIndex]);
+      if (data.response) {
+        console.warn('[hls] → HTTP yanıt:', data.response.code, data.response.text, '| url:', data.url);
+      }
       if (data.fatal) {
         switch (data.type) {
           case Hls.ErrorTypes.NETWORK_ERROR:
@@ -173,13 +268,15 @@ function setupHls() {
               currentSourceIndex++;
               console.log('[hls] kaynak değiştiriliyor →', STREAM_SOURCES[currentSourceIndex]);
               showToast('Kaynak değiştiriliyor…');
+              setLoaderText('Kaynak değiştiriliyor…');
               // kısa gecikmeyle yeniden yükle
               setTimeout(() => loadSource(hls), 500);
             } else if (data.details === 'manifestLoadError') {
-              // Tüm kaynaklar tükendi → baştan dene (döngü)
-              showToast('Yayın kaynakları yeniden deneniyor…', 3000);
-              currentSourceIndex = 0;
-              setTimeout(() => loadSource(hls), 1500);
+              // Tüm kaynaklar tükendi → watchdog devreye girsin, hatayı gösterelim
+              showStreamError(
+                'TRT1 yayınıına ulaşılamadı (manifest yüklenemedi). ' +
+                'Bağlantını kontrol et veya Tekrar Dene\'ye bas.'
+              );
             } else {
               // Segment seviyesi ağ hatası → tekrar dene
               showToast('Yayın bağlantısı koptu, yeniden deneniyor…');
@@ -191,7 +288,10 @@ function setupHls() {
             hls.recoverMediaError();
             break;
           default:
-            showToast('Yayın yüklenemedi. TRT1 kaynağı şu an erişilemiyor olabilir.');
+            showStreamError(
+              'Yayın yüklenemedi (HLS hatası: ' + data.details + '). ' +
+              'Tekrar Dene\'ye bas.'
+            );
             destroyHls();
             break;
         }
@@ -206,10 +306,11 @@ function setupHls() {
       els.video.muted = true;
       els.video.play().then(unmuteInitial).catch(() => {});
       hideLoader();
+      clearLoaderWatchdog();
       enableControls(true);
     });
   } else {
-    showToast('Tarayıcınız HLS oynatmayı desteklemiyor.');
+    showStreamError('Tarayıcınız HLS canlı yayını desteklemiyor.');
   }
 }
 
@@ -217,10 +318,28 @@ function setupHls() {
 function loadSource(hls) {
   const url = STREAM_SOURCES[currentSourceIndex];
   console.log('[hls] yükleniyor:', url);
+  setLoaderText(currentSourceIndex === 0 ? 'Yayın yükleniyor…' : 'Yedek kaynak deneniyor…');
+  hideStreamError();
+  startLoaderWatchdog();
   hls.loadSource(url);
 }
 
+// Kullanıcı "Tekrar Dene" butonuna bastığında — taze başlangıç
+function manualRetry() {
+  console.log('[retry] kullanıcı tekrar deniyor');
+  retryCount = 0;
+  currentSourceIndex = 0;
+  // Mevcut HLS'i tamamen yok et ve sıfırdan kur
+  destroyHls();
+  // playOverlay varsa kaldır
+  const oldOverlay = document.getElementById('playOverlay');
+  if (oldOverlay) oldOverlay.remove();
+  hideStreamError();
+  setupHls();
+}
+
 function destroyHls() {
+  clearLoaderWatchdog();
   if (state.hls) {
     state.hls.destroy();
     state.hls = null;
@@ -695,8 +814,24 @@ els.video.addEventListener('volumechange', () => {
   updateMuteIcon();
   updateLiveBadge();
 });
+// Video hazır olayları — loader'ı gizlemek için EN güvenilir güvenlik ağı.
+// HLS.js olayları bazen gecikir/atlanır; ama video elementinin kendi olayları her zaman tetiklenir.
+els.video.addEventListener('loadeddata', () => {
+  hideLoader();
+  clearLoaderWatchdog();
+});
+els.video.addEventListener('canplay', () => {
+  hideLoader();
+  clearLoaderWatchdog();
+  enableControls(true);
+});
+els.video.addEventListener('canplaythrough', () => {
+  hideLoader();
+  clearLoaderWatchdog();
+});
 els.video.addEventListener('playing', () => {
   hideLoader();
+  clearLoaderWatchdog();
   updateLiveBadge();
 });
 els.video.addEventListener('timeupdate', updateLiveBadge);
@@ -708,6 +843,11 @@ els.video.addEventListener('waiting', () => {
 els.togglePanelBtn.addEventListener('click', () => {
   els.panel.classList.toggle('collapsed');
 });
+
+/* ---- Retry (yayın yüklenemedi paneli) ---- */
+if (els.retryBtn) {
+  els.retryBtn.addEventListener('click', manualRetry);
+}
 
 /* ---- Sinema modu ---- */
 els.cinemaBtn.addEventListener('click', () => toggleCinemaMode());
