@@ -63,7 +63,28 @@ const state = {
   idleTimer: null,
 };
 
-const STREAM_URL = '/stream/master.m3u8';
+/* ---------- Kaynaklar (fallback sırasıyla) ----------
+   TRT CDN tarayıcıdan direkt erişime açık (CORS: *).
+   1) TRT ana CDN (düşük gecikme)
+   2) Yedek TRT CDN
+   3) Server-side proxy (geo-block olmayan ortamda yedek)
+
+   Not: localhost'ta proxy önceliklidir (en güvenilir); canlı deployda
+   direkt TRT kaynakları önceliklidir (Railway yurt dışı IP'yi engeller).
+*/
+const isLocal = /^(localhost|127\.0\.0\.1)/.test(location.hostname);
+const STREAM_SOURCES = isLocal
+  ? [
+      '/stream/master.m3u8',                                  // yerel proxy — senin PC'n TRT'ye erişir
+      'https://tv-trt1.medya.trt.com.tr/master.m3u8',         // direkt yedek
+      'https://trt-daioncdn.mb3x.com/trt-1/master.m3u8',      // alternatif CDN
+    ]
+  : [
+      'https://tv-trt1.medya.trt.com.tr/master.m3u8',         // direkt — tarayıcıdan (TR CORS açık)
+      'https://trt-daioncdn.mb3x.com/trt-1/master.m3u8',      // alternatif CDN
+      '/stream/master.m3u8',                                  // proxy son çare (deployda 403 olabilir)
+    ];
+let currentSourceIndex = 0;
 
 /* =================================================================
    Yardımcılar
@@ -127,8 +148,9 @@ function setupHls() {
     });
     state.hls = hls;
 
-    hls.loadSource(STREAM_URL);
-    hls.attachMedia(els.video);
+    // İlk kaynaktan başla
+    currentSourceIndex = 0;
+    loadSource(hls);
 
     hls.on(Hls.Events.MANIFEST_PARSED, () => {
       fillQualityOptions(hls);
@@ -151,14 +173,30 @@ function setupHls() {
     });
 
     hls.on(Hls.Events.ERROR, (_evt, data) => {
-      console.warn('[hls] hata:', data.type, data.details);
+      console.warn('[hls] hata:', data.type, data.details, 'kaynak:', STREAM_SOURCES[currentSourceIndex]);
       if (data.fatal) {
         switch (data.type) {
           case Hls.ErrorTypes.NETWORK_ERROR:
-            showToast('Yayın bağlantısı koptu, yeniden deneniyor…');
-            hls.startLoad();
+            // Manifest yüklenemedi → sonraki kaynağa geç
+            if (data.details === 'manifestLoadError' && currentSourceIndex < STREAM_SOURCES.length - 1) {
+              currentSourceIndex++;
+              console.log('[hls] kaynak değiştiriliyor →', STREAM_SOURCES[currentSourceIndex]);
+              showToast('Kaynak değiştiriliyor…');
+              // kısa gecikmeyle yeniden yükle
+              setTimeout(() => loadSource(hls), 500);
+            } else if (data.details === 'manifestLoadError') {
+              // Tüm kaynaklar tükendi → baştan dene (döngü)
+              showToast('Yayın kaynakları yeniden deneniyor…', 3000);
+              currentSourceIndex = 0;
+              setTimeout(() => loadSource(hls), 1500);
+            } else {
+              // Segment seviyesi ağ hatası → tekrar dene
+              showToast('Yayın bağlantısı koptu, yeniden deneniyor…');
+              hls.startLoad();
+            }
             break;
           case Hls.ErrorTypes.MEDIA_ERROR:
+            showToast('Görüntü kurtarılıyor…');
             hls.recoverMediaError();
             break;
           default:
@@ -171,7 +209,8 @@ function setupHls() {
 
   } else if (els.video.canPlayType('application/vnd.apple.mpegurl')) {
     // Safari yerel HLS desteği
-    els.video.src = STREAM_URL;
+    currentSourceIndex = 0;
+    els.video.src = STREAM_SOURCES[0];
     els.video.addEventListener('loadedmetadata', () => {
       els.video.muted = true;
       els.video.play().then(unmuteInitial).catch(() => {});
@@ -181,6 +220,13 @@ function setupHls() {
   } else {
     showToast('Tarayıcınız HLS oynatmayı desteklemiyor.');
   }
+}
+
+// Belirli bir kaynağı HLS'e yükle
+function loadSource(hls) {
+  const url = STREAM_SOURCES[currentSourceIndex];
+  console.log('[hls] yükleniyor:', url);
+  hls.loadSource(url);
 }
 
 function destroyHls() {
