@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>WatchFriend — Birlikte İzle</title>
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <!-- ===================== ANA SAYFA (oda oluşturma) ===================== -->
+  <section id="landing" class="screen active">
+    <div class="landing-card">
+      <div class="logo">
+        <div class="logo-mark">
+          <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M15 10l-5 3V7z" fill="currentColor"/>
+            <circle cx="12" cy="12" r="9"/>
+          </svg>
+        </div>
+        <div class="logo-text">Watch<span>Friend</span></div>
+      </div>
+
+      <h1>Dünya Kupası'nı<br /><span class="accent">birlikte</span> izleyin</h1>
+      <p class="subtitle">TRT1'i senkron, gecikmesiz ve sesli sohbet olmadan — sadece görüntü. Oda kur, davet et, beraber izle.</p>
+
+      <div class="landing-form">
+        <input type="text" id="nameInput" placeholder="Adın" maxlength="20" autocomplete="off" />
+        <button id="createRoomBtn" class="btn-primary">
+          <span class="btn-label">Oda Oluştur</span>
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M5 12h14M13 6l6 6-6 6"/>
+          </svg>
+        </button>
+      </div>
+
+      <div class="divider"><span>veya</span></div>
+
+      <div class="join-row">
+        <input type="text" id="joinInput" placeholder="Oda kodu (örn: a1b2c3)" maxlength="12" autocomplete="off" />
+        <button id="joinBtn" class="btn-secondary">Katıl</button>
+      </div>
+
+      <div id="landingError" class="error-msg hidden"></div>
+    </div>
+
+    <div class="landing-footnote">
+      <span class="live-dot"></span> TRT1 Canlı · Senkron oynatma
+    </div>
+  </section>
+
+  <!-- ===================== ODA SAYFASI ===================== -->
+  <section id="room" class="screen">
+    <!-- Üst bar -->
+    <header class="topbar">
+      <div class="topbar-left">
+        <div class="logo-mark small">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M15 10l-5 3V7z" fill="currentColor"/>
+            <circle cx="12" cy="12" r="9"/>
+          </svg>
+        </div>
+        <div class="room-title">
+          <span id="roomName">İzleme Odası</span>
+          <span class="room-code" id="roomCode"></span>
+        </div>
+      </div>
+      <div class="topbar-right">
+        <span class="host-badge hidden" id="hostBadge">HOST</span>
+        <button id="cinemaBtn" class="icon-btn cinema-btn" title="Sinema modu (görüntü her şeyi kaplar, ESC ile çık)">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 9V5a2 2 0 012-2h4M21 9V5a2 2 0 00-2-2h-4M3 15v4a2 2 0 002 2h4M21 15v4a2 2 0 01-2 2h-4"/>
+          </svg>
+        </button>
+        <button id="togglePanelBtn" class="icon-btn" title="Paneli aç/kapat">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 6h18M3 12h18M3 18h18"/>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- İçerik: video + panel -->
+    <div class="room-body">
+      <main class="stage" id="stage">
+        <div class="player-shell">
+          <video id="video" playsinline></video>
+
+          <!-- Yükleniyor göstergesi -->
+          <div class="loader" id="loader">
+            <div class="spinner"></div>
+            <span>Yayın yükleniyor…</span>
+          </div>
+
+          <!-- Bağlantı kuruluyor -->
+          <div class="overlay-msg hidden" id="connectingMsg">
+            <div class="spinner"></div>
+            <span>Odaya bağlanıyor…</span>
+          </div>
+
+          <!-- Sinema modu çıkış butonu (sadece sinema modunda görünür) -->
+          <button id="cinemaExitBtn" class="cinema-exit hidden" title="Sinema modundan çık (ESC)">
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M9 9l6 6M15 9l-6 6"/>
+              <circle cx="12" cy="12" r="9"/>
+            </svg>
+          </button>
+
+          <!-- Kontrol çubuğu -->
+          <div class="controls" id="controls">
+            <div class="controls-row">
+              <button class="ctrl-btn" id="playPauseBtn" disabled title="Oynat/Duraklat">
+                <svg class="icon-play" viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+                <svg class="icon-pause hidden" viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg>
+              </button>
+
+              <button class="ctrl-btn" id="liveBtn" title="Canlı uca dön">
+                <span class="live-rec"></span>
+                <span class="live-text">CANLI</span>
+              </button>
+
+              <!-- Ses -->
+              <div class="volume-group">
+                <button class="ctrl-btn" id="muteBtn" title="Sesi aç/kapat">
+                  <svg class="icon-vol" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M11 5L6 9H3v6h3l5 4V5z"/>
+                    <path d="M15.5 8.5a5 5 0 010 7M18.5 5.5a9 9 0 010 13"/>
+                  </svg>
+                  <svg class="icon-mute hidden" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M11 5L6 9H3v6h3l5 4V5z"/>
+                    <path d="M22 9l-6 6M16 9l6 6"/>
+                  </svg>
+                </button>
+                <input type="range" id="volumeSlider" min="0" max="100" value="80" class="volume-slider" />
+              </div>
+
+              <div class="spacer"></div>
+
+              <!-- Kalite -->
+              <div class="quality-group">
+                <select id="qualitySelect" class="quality-select" title="Görüntü kalitesi">
+                  <option value="-1">Otomatik</option>
+                </select>
+              </div>
+            </div>
+
+            <!-- İzleyici ise kilit mesajı -->
+            <div class="viewer-hint hidden" id="viewerHint">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="5" y="11" width="14" height="9" rx="2"/>
+                <path d="M8 11V8a4 4 0 018 0v3"/>
+              </svg>
+              <span>Yalnızca oda sahibi kontrol eder</span>
+            </div>
+          </div>
+        </div>
+      </main>
+
+      <!-- Yan panel (katılımcılar) -->
+      <aside class="panel" id="panel">
+        <div class="panel-header">
+          <span>Katılımcılar</span>
+          <span class="panel-count" id="participantCount">0</span>
+        </div>
+
+        <ul class="participant-list" id="participantList"></ul>
+
+        <div class="panel-divider"></div>
+
+        <div class="panel-section">
+          <label class="panel-label">Davet Linki</label>
+          <div class="invite-row">
+            <input type="text" id="inviteLink" readonly />
+            <button id="copyInviteBtn" class="btn-secondary small">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="9" y="9" width="11" height="11" rx="2"/>
+                <path d="M5 15V5a2 2 0 012-2h10"/>
+              </svg>
+            </button>
+          </div>
+          <button id="leaveBtn" class="btn-leave">Odadan Ayrıl</button>
+        </div>
+      </aside>
+    </div>
+  </section>
+
+  <!-- Toast -->
+  <div id="toast" class="toast hidden"></div>
+
+  <!-- HLS.js (m3u8 oynatma) + Socket.IO (gerçek zamanlı) -->
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.13/dist/hls.min.js"></script>
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
