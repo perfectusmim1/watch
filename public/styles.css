@@ -432,6 +432,7 @@ input[type="text"]:focus {
   height: 100%;
   display: block;
   background: #000;
+  object-fit: contain;
 }
 
 /* Loader & overlay */
@@ -1193,6 +1194,18 @@ body.cinema-active .stage {
 }
 
 body.cinema-active .player-shell {
+  max-width: none;
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh; /* mobilde adres çubuğu hariç gerçek yükseklik */
+  aspect-ratio: auto;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+/* Native fullscreen modunda da düzgün kaplansın */
+:fullscreen .player-shell,
+:-webkit-full-screen .player-shell {
   max-width: none;
   width: 100vw;
   height: 100vh;

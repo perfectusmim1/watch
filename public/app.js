@@ -900,7 +900,33 @@ function startHostSync() {
 
 /* =================================================================
    Sinema modu — video tüm ekranı kaplar, arayüz gizlenir
+   Mobilde: tarayıcının native Fullscreen API'sini kullanır (adres çubuğu kaybolur).
+   Masaüstünde: CSS tabanlı sinema modu (site içinde UI kaybolur).
    ================================================================= */
+function canNativeFullscreen() {
+  const el = document.documentElement;
+  return !!(el.requestFullscreen || el.webkitRequestFullscreen || el.msRequestFullscreen);
+}
+
+function enterNativeFullscreen() {
+  const el = document.documentElement;
+  if (el.requestFullscreen) return el.requestFullscreen();
+  if (el.webkitRequestFullscreen) return el.webkitRequestFullscreen();
+  if (el.msRequestFullscreen) return el.msRequestFullscreen();
+  return Promise.reject();
+}
+
+function exitNativeFullscreen() {
+  if (document.exitFullscreen) return document.exitFullscreen();
+  if (document.webkitExitFullscreen) return document.webkitExitFullscreen();
+  if (document.msExitFullscreen) return document.msExitFullscreen();
+  return Promise.reject();
+}
+
+function isNativeFullscreen() {
+  return !!(document.fullscreenElement || document.webkitFullscreenElement || document.msFullscreenElement);
+}
+
 function toggleCinemaMode(force) {
   state.cinemaMode = typeof force === 'boolean' ? force : !state.cinemaMode;
   document.body.classList.toggle('cinema-active', state.cinemaMode);
@@ -909,13 +935,36 @@ function toggleCinemaMode(force) {
     // sinema moduna girerken kontrolleri görünür kıl, idle sayacını başlat
     document.body.classList.remove('idle-hide');
     resetIdleTimer();
-    showToast('Sinema modu — çıkmak için ESC', 1800);
+
+    // Mobilde native fullscreen kullan (adres çubuğunu gizler)
+    if (isMobile() && canNativeFullscreen() && !isNativeFullscreen()) {
+      enterNativeFullscreen().catch(() => {});
+    }
+
+    showToast('Sinema modu — çıkmak için ✕ butonuna bas', 1800);
   } else {
     // çıkışta idle gizlemeyi temizle
     clearTimeout(state.idleTimer);
     document.body.classList.remove('idle-hide');
+
+    // Native fullscreen'den de çık
+    if (isNativeFullscreen()) {
+      exitNativeFullscreen().catch(() => {});
+    }
   }
 }
+
+// Tarayıcı kendi fullscreen'den çıkarsa (örn. geri butonu, swipe)
+// sinema modunu da kapat
+['fullscreenchange', 'webkitfullscreenchange'].forEach((evt) => {
+  document.addEventListener(evt, () => {
+    if (!isNativeFullscreen() && state.cinemaMode) {
+      state.cinemaMode = false;
+      document.body.classList.remove('cinema-active', 'idle-hide');
+      clearTimeout(state.idleTimer);
+    }
+  });
+});
 
 function resetIdleTimer() {
   if (!state.cinemaMode) return;
