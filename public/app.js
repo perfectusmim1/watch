@@ -40,6 +40,8 @@ const els = {
   viewerHint: $('viewerHint'),
   // panel
   panel: $('panel'),
+  panelBackdrop: $('panelBackdrop'),
+  panelCloseBtn: $('panelCloseBtn'),
   participantList: $('participantList'),
   participantCount: $('participantCount'),
   inviteLink: $('inviteLink'),
@@ -643,6 +645,11 @@ function enterRoom(room, roomId) {
   els.roomCode.textContent = '#' + roomId;
   els.participantCount.textContent = room.users.length;
 
+  // Mobilde odaya girince panel kapalı başlasın (video öne çıksın),
+  // masaüstünde açık kalsın. Bu, "sağda koca panel açık kalıp kapanmıyor"
+  // sorununu önler.
+  setPanelOpen(!isMobile());
+
   // davet linki
   const invite = window.location.origin + '/room/' + roomId;
   els.inviteLink.value = invite;
@@ -839,9 +846,45 @@ els.video.addEventListener('waiting', () => {
   // buffering göstergesi opsiyonel
 });
 
-/* ---- Panel ---- */
+/* ---- Panel ----
+   Masaüstünde: panel sabit, topbar'daki hamburger aç/kapa yapar.
+   Mobilde: panel sağdan açılır bir drawer'dır — kapat butonu ve
+   arka plana (backdrop) dokununca kapanır. Drawer açıkken topbar'ı
+   KAPLAMAZ (altında açılır), böylece hamburger butonu her zaman erişilebilir. */
+function isMobile() {
+  return window.matchMedia('(max-width: 760px)').matches;
+}
+
+function setPanelOpen(open) {
+  els.panel.classList.toggle('collapsed', !open);
+  if (els.panelBackdrop) {
+    els.panelBackdrop.classList.toggle('show', open && isMobile());
+  }
+}
+
 els.togglePanelBtn.addEventListener('click', () => {
-  els.panel.classList.toggle('collapsed');
+  setPanelOpen(els.panel.classList.contains('collapsed'));
+});
+
+// Panelin içindeki (mobilde görünen) kapat butonu
+if (els.panelCloseBtn) {
+  els.panelCloseBtn.addEventListener('click', () => setPanelOpen(false));
+}
+
+// Backdrop'a dokununca drawer kapansın
+if (els.panelBackdrop) {
+  els.panelBackdrop.addEventListener('click', () => setPanelOpen(false));
+}
+
+// Ekran boyutu değişince (örn. telefonu döndürme) panel durumunu düzelt:
+//  - Masaüstüne geçilirse backdrop kapatılır, panel açık kalır
+//  - Dar ekran açıksa ve panel görünürde değilse dokunulabilir alanı
+//    kapatmak için backdrop'i güncelle
+window.addEventListener('resize', () => {
+  const open = !els.panel.classList.contains('collapsed');
+  if (els.panelBackdrop) {
+    els.panelBackdrop.classList.toggle('show', open && isMobile());
+  }
 });
 
 /* ---- Retry (yayın yüklenemedi paneli) ---- */

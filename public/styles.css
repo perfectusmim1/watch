@@ -631,12 +631,53 @@ input[type="text"]:focus {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
   font-size: 13px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--text-dim);
   margin-bottom: 14px;
+}
+
+/* Masaüstünde panel kapama butonu gizli (topbar hamburger'ı kullanılır).
+   Sadece mobilde görünür hâle gelir — mobil.scss bloğunda. */
+.panel-titles {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.panel-close {
+  display: none;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-sm);
+  color: var(--text-dim);
+  transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+
+.panel-close:hover {
+  background: var(--bg-3);
+  color: var(--text);
+}
+
+/* Backdrop: yalnızca mobilde drawer açıkken görünür karanlık perde */
+.panel-backdrop {
+  display: none;
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  opacity: 0;
+  z-index: 40;
+  transition: opacity var(--dur-slow) var(--ease);
+  pointer-events: none;
+}
+
+.panel-backdrop.show {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .panel-count {
@@ -872,23 +913,68 @@ body.cinema-active.idle-hide .controls {
    Responsive
    ================================================================= */
 @media (max-width: 760px) {
+  /* --- Paneli sağdan açılır drawer'a çevir ---
+     Masaüstündeki margin-right animasyonu yerine transform kullanıyoruz;
+     böylece panel topbar'ı KAPLAMAZ, onun altında açılır. */
   .panel {
     position: absolute;
     top: 0;
     right: 0;
     bottom: 0;
     z-index: 50;
+    width: min(86vw, 320px);
     box-shadow: -8px 0 32px rgba(0, 0, 0, 0.4);
+    transform: translateX(0);
+    transition: transform var(--dur-slow) var(--ease), opacity var(--dur-slow) var(--ease);
+    margin-right: 0;
   }
 
+  /* Kapalı: ekranın sağına kaydır (margin-right yerine) */
   .panel.collapsed {
-    margin-right: -100%;
+    margin-right: 0;
+    transform: translateX(100%);
+    opacity: 0;
   }
 
+  /* Drawer açıkken kapat butonu ve backdrop aktif */
+  .panel-close {
+    display: grid;
+  }
+
+  .panel-backdrop {
+    display: block;
+  }
+
+  /* Video sahnesi mobilde tam genişlik kullanır */
   .stage {
     padding: 10px;
   }
 
+  /* Üst bar: oda adı taşmasın, butonlar her zaman dokunulabilir olsun */
+  .topbar {
+    padding: 10px 14px;
+  }
+
+  .room-title {
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  #roomName {
+    font-size: 14px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 46vw;
+  }
+
+  /* Dar ekranda host rozeti biraz daha küçük */
+  .host-badge {
+    padding: 3px 8px;
+    font-size: 10px;
+  }
+
+  /* Landing */
   #landing h1 {
     font-size: 24px;
   }
@@ -897,8 +983,27 @@ body.cinema-active.idle-hide .controls {
     padding: 28px 22px;
   }
 
+  /* Dar ekranda ses kaydırıcısını gizle — sadece sessiz/açık butonu kalsın,
+     böylece kontrol çubuğu taşmaz */
   .volume-slider {
-    width: 60px;
+    display: none;
+  }
+}
+
+/* Çok küçük / dar telefonlar (örn. 360px ve altı) */
+@media (max-width: 400px) {
+  #roomName {
+    max-width: 40vw;
+  }
+
+  .icon-btn {
+    width: 34px;
+    height: 34px;
+  }
+
+  .quality-select {
+    padding: 6px 8px;
+    font-size: 12px;
   }
 }
 
