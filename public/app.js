@@ -1004,9 +1004,25 @@ els.liveBtn.addEventListener('click', () => {
 
 els.muteBtn.addEventListener('click', () => {
   if (!state.isHost) return;
-  els.video.muted = !els.video.muted;
+  
+  const isMuted = els.video.muted || els.video.volume === 0;
+  
+  if (isMuted) {
+    let vol = parseInt(els.volumeSlider.value, 10) / 100;
+    if (vol === 0) {
+      vol = 0.8;
+      els.volumeSlider.value = 80;
+    }
+    els.video.volume = vol;
+    els.video.muted = false;
+    sendHostCommand({ type: 'volume', value: vol });
+    sendHostCommand({ type: 'mute', value: false });
+  } else {
+    els.video.muted = true;
+    sendHostCommand({ type: 'mute', value: true });
+  }
+  
   updateMuteIcon();
-  sendHostCommand({ type: 'mute', value: els.video.muted });
 });
 
 els.volumeSlider.addEventListener('input', () => {
