@@ -167,7 +167,10 @@ app.get('/stream/*', (clientReq, clientRes) => {
 /* ------------------------------------------------------------------ */
 /* Oda yönetimi (bellek içi)                                          */
 /* ------------------------------------------------------------------ */
-const rooms = new Map(); // roomId -> { id, name, hostSocketId, users: Map(socketId -> {name, isHost}) }
+const rooms = new Map(); // roomId -> { id, name, hostSocketId, users: Map(socketId -> {name, isHost}), messages: [] }
+
+const CHAT_HISTORY_LIMIT = 100; // oda başına tutulacak en fazla mesaj
+const CHAT_MAX_LEN = 500; // tek bir mesajın en fazla karakter uzunluğu
 
 function genRoomId() {
   return crypto.randomBytes(3).toString('hex'); // 6 karakter
@@ -188,6 +191,27 @@ function broadcastRoomState(room) {
   io.to(room.id).emit('room-state', roomSummary(room));
 }
 
+// Odaya sistem mesajı ekle ve kalan herkese yayınla
+// (to = null ise odadaki herkese, socket.id verilirse sadece dışındakilere)
+function pushSystemMessage(room, text, excludeSocketId) {
+  const msg = {
+    id: crypto.randomBytes(6).toString('hex'),
+    name: '',
+    text,
+    ts: Date.now(),
+    system: true,
+  };
+  room.messages.push(msg);
+  if (room.messages.length > CHAT_HISTORY_LIMIT) {
+    room.messages.splice(0, room.messages.length - CHAT_HISTORY_LIMIT);
+  }
+  if (excludeSocketId) {
+    io.to(room.id).except(excludeSocketId).emit('chat-message', msg);
+  } else {
+    io.to(room.id).emit('chat-message', msg);
+  }
+}
+
 /* ------------------------------------------------------------------ */
 /* Socket.IO — senkronizasyon kanalı                                  */
 /* ------------------------------------------------------------------ */
@@ -205,6 +229,7 @@ io.on('connection', (socket) => {
         name: name ? `${name}'in Odası` : 'İzleme Odası',
         hostSocketId: socket.id,
         users: new Map(),
+        messages: [],
       };
       rooms.set(roomId, room);
     }
@@ -220,15 +245,45 @@ io.on('connection', (socket) => {
         ok: true,
         isHost: room.users.get(socket.id).isHost,
         room: roomSummary(room),
+        messages: room.messages,
       });
     }
 
     broadcastRoomState(room);
 
+    // Sohbet: yeni katılan hariç herkese sistem mesajı bildir
+    pushSystemMessage(room, `${name || 'İzleyici'} katıldı`, socket.id);
+
     // Yeni katılanlara mevcut host state'ini hemen iste
     if (room.hostSocketId && room.hostSocketId !== socket.id) {
       io.to(room.hostSocketId).emit('request-state', { to: socket.id });
     }
+  });
+
+  // Sohbet mesajı — doğrula ve odaya yayınla (gönderen dahil herkes alır)
+  socket.on('chat-message', (payload, ack) => {
+    const roomId = socket.data.roomId;
+    const room = roomId && rooms.get(roomId);
+    if (!room) return;
+
+    const text = typeof payload === 'string' ? payload : payload && payload.text;
+    if (typeof text !== 'string') return;
+    const trimmed = text.trim().slice(0, CHAT_MAX_LEN);
+    if (!trimmed) return;
+
+    const msg = {
+      id: crypto.randomBytes(6).toString('hex'),
+      name: socket.data.name || 'İzleyici',
+      text: trimmed,
+      ts: Date.now(),
+      system: false,
+    };
+    room.messages.push(msg);
+    if (room.messages.length > CHAT_HISTORY_LIMIT) {
+      room.messages.splice(0, room.messages.length - CHAT_HISTORY_LIMIT);
+    }
+    io.to(room.id).emit('chat-message', msg);
+    if (typeof ack === 'function') ack({ ok: true, id: msg.id });
   });
 
   // Host → tüm odaya komut yayınla (play/pause/seek-live/mute/volume/quality)
@@ -269,6 +324,7 @@ function leaveRoom(socket) {
   const room = rooms.get(roomId);
   if (!room) return;
 
+  const leavingName = room.users.get(socket.id)?.name || socket.data.name || 'İzleyici';
   const wasHost = room.users.get(socket.id)?.isHost;
   room.users.delete(socket.id);
 
@@ -286,6 +342,9 @@ function leaveRoom(socket) {
     io.to(nextSocketId).emit('you-are-host');
     console.log(`[io] yeni host: ${nextSocketId} (oda ${roomId})`);
   }
+
+  // Sohbet: kalan herkese ayrılış bildir
+  pushSystemMessage(room, `${leavingName} ayrıldı`);
 
   broadcastRoomState(room);
 }

@@ -37,6 +37,10 @@ const els = {
   muteBtn: $('muteBtn'),
   volumeSlider: $('volumeSlider'),
   qualitySelect: $('qualitySelect'),
+  customQualitySelect: $('customQualitySelect'),
+  customQualityTrigger: $('customQualityTrigger'),
+  customQualityValue: $('customQualityValue'),
+  customQualityDropdown: $('customQualityDropdown'),
   viewerHint: $('viewerHint'),
   // panel
   panel: $('panel'),
@@ -47,6 +51,17 @@ const els = {
   inviteLink: $('inviteLink'),
   copyInviteBtn: $('copyInviteBtn'),
   leaveBtn: $('leaveBtn'),
+  // sekmeler + sohbet
+  tabParticipants: $('tabParticipants'),
+  tabChat: $('tabChat'),
+  paneParticipants: $('paneParticipants'),
+  paneChat: $('paneChat'),
+  chatMessages: $('chatMessages'),
+  chatEmpty: $('chatEmpty'),
+  chatBadge: $('chatBadge'),
+  chatForm: $('chatForm'),
+  chatInput: $('chatInput'),
+  chatSendBtn: $('chatSendBtn'),
   // cinema
   cinemaBtn: $('cinemaBtn'),
   cinemaExitBtn: $('cinemaExitBtn'),
@@ -67,6 +82,9 @@ const state = {
   // sinema modu
   cinemaMode: false,
   idleTimer: null,
+  // sohbet
+  unreadChat: 0, // sohbet sekmesi kapalıyken gelen mesaj sayısı
+  activeTab: 'participants', // 'participants' | 'chat'
 };
 
 /* ---------- Kaynaklar ----------
@@ -423,6 +441,7 @@ function fillQualityOptions(hls) {
     opt.textContent = label;
     sel.appendChild(opt);
   });
+  rebuildCustomQualityOptions();
 }
 
 function updateQualitySelectValue(levelIndex) {
@@ -432,6 +451,64 @@ function updateQualitySelectValue(levelIndex) {
   } else {
     els.qualitySelect.value = String(levelIndex);
   }
+  syncCustomQualitySelect();
+}
+
+function rebuildCustomQualityOptions() {
+  const dropdown = els.customQualityDropdown;
+  if (!dropdown) return;
+  
+  dropdown.innerHTML = '';
+  
+  // Otomatik seçeneği
+  const autoOpt = document.createElement('div');
+  autoOpt.className = 'custom-select-option';
+  autoOpt.dataset.value = '-1';
+  autoOpt.textContent = 'Otomatik';
+  autoOpt.addEventListener('click', (e) => {
+    e.stopPropagation();
+    selectCustomQuality('-1');
+  });
+  dropdown.appendChild(autoOpt);
+  
+  // Dinamik seviyeler
+  const nativeOptions = els.qualitySelect.querySelectorAll('option');
+  nativeOptions.forEach((opt) => {
+    if (opt.value === '-1') return;
+    const item = document.createElement('div');
+    item.className = 'custom-select-option';
+    item.dataset.value = opt.value;
+    item.textContent = opt.textContent;
+    item.addEventListener('click', (e) => {
+      e.stopPropagation();
+      selectCustomQuality(opt.value);
+    });
+    dropdown.appendChild(item);
+  });
+  
+  syncCustomQualitySelect();
+}
+
+function selectCustomQuality(value) {
+  if (els.customQualitySelect.classList.contains('disabled')) return;
+  els.qualitySelect.value = value;
+  els.qualitySelect.dispatchEvent(new Event('change'));
+  els.customQualitySelect.classList.remove('open');
+  syncCustomQualitySelect();
+}
+
+function syncCustomQualitySelect() {
+  if (!els.customQualityValue || !els.customQualityDropdown) return;
+  const currentValue = els.qualitySelect.value;
+  const selectedOpt = els.qualitySelect.querySelector(`option[value="${currentValue}"]`);
+  const label = selectedOpt ? selectedOpt.textContent : 'Otomatik';
+  els.customQualityValue.textContent = label;
+  
+  const customOptions = els.customQualityDropdown.querySelectorAll('.custom-select-option');
+  customOptions.forEach((opt) => {
+    const isSelected = opt.dataset.value === currentValue;
+    opt.classList.toggle('selected', isSelected);
+  });
 }
 
 /* =================================================================
@@ -553,7 +630,7 @@ function connectSocket(roomId, name) {
         return;
       }
       state.isHost = res.isHost;
-      enterRoom(res.room, roomId);
+      enterRoom(res.room, roomId, res.messages || []);
     });
   });
 
@@ -606,6 +683,11 @@ function connectSocket(roomId, name) {
     startHostSync();
     showToast('Oda sahibi oldun! Artık kontrol sende.');
   });
+
+  // Sohbet: yeni mesaj (kullanıcı veya sistem)
+  socket.on('chat-message', (msg) => {
+    appendMessage(msg);
+  });
 }
 
 function renderParticipants(room) {
@@ -639,16 +721,142 @@ function renderParticipants(room) {
   });
 }
 
-function enterRoom(room, roomId) {
+/* =================================================================
+   Sohbet (chat sekmesi)
+   ================================================================= */
+
+/* Sohbeti ilk yükleme / oda değişiminde sıfırla */
+function resetChat() {
+  if (els.chatMessages) els.chatMessages.innerHTML = '';
+  state.unreadChat = 0;
+  updateChatBadge();
+  toggleChatEmpty();
+}
+
+/* Bir mesajı DOM'a ekle.
+   msg: { id, name, text, ts, system }
+   opts.silent: geçmiş yüklenirken auto-scroll/badge tetiklenmesin */
+function appendMessage(msg, opts) {
+  if (!els.chatMessages) return;
+  const silent = opts && opts.silent;
+
+  const li = document.createElement('li');
+
+  if (msg.system) {
+    li.className = 'chat-msg system';
+    const sys = document.createElement('div');
+    sys.className = 'chat-system';
+    sys.textContent = msg.text || '';
+    li.appendChild(sys);
+  } else {
+    const mine = msg.name === state.name;
+    li.className = 'chat-msg ' + (mine ? 'outgoing' : 'incoming');
+
+    // avatar + isim (sadece başkalarının mesajlarında)
+    if (!mine) {
+      const head = document.createElement('div');
+      head.className = 'chat-msg-head';
+
+      const av = document.createElement('div');
+      av.className = 'chat-avatar';
+      av.style.background = avatarColor(msg.name);
+      av.textContent = initials(msg.name);
+
+      const nameEl = document.createElement('span');
+      nameEl.className = 'chat-name';
+      nameEl.textContent = msg.name;
+
+      head.appendChild(av);
+      head.appendChild(nameEl);
+      li.appendChild(head);
+    }
+
+    const bubble = document.createElement('div');
+    bubble.className = 'chat-bubble';
+    // textContent ile yaz → HTML enjeksiyonu olmaz
+    bubble.textContent = msg.text || '';
+    li.appendChild(bubble);
+  }
+
+  els.chatMessages.appendChild(li);
+  toggleChatEmpty();
+
+  if (!silent) {
+    // Sohbet sekmesi kapalıysa okunmamış sayacını artır, değilse alta kaydır
+    if (state.activeTab !== 'chat') {
+      state.unreadChat++;
+      updateChatBadge();
+    } else {
+      scrollChatToBottom();
+    }
+  }
+}
+
+function scrollChatToBottom() {
+  if (!els.chatMessages) return;
+  els.chatMessages.scrollTop = els.chatMessages.scrollHeight;
+}
+
+function toggleChatEmpty() {
+  if (!els.chatEmpty || !els.chatMessages) return;
+  const empty = els.chatMessages.children.length === 0;
+  els.chatEmpty.classList.toggle('hidden', !empty);
+}
+
+function updateChatBadge() {
+  if (!els.chatBadge) return;
+  if (state.unreadChat > 0) {
+    els.chatBadge.textContent = state.unreadChat > 99 ? '99+' : String(state.unreadChat);
+    els.chatBadge.classList.remove('hidden');
+  } else {
+    els.chatBadge.classList.add('hidden');
+  }
+}
+
+/* Sekme değiştir: 'participants' | 'chat' */
+function setActiveTab(tab) {
+  state.activeTab = tab;
+
+  els.tabParticipants.classList.toggle('active', tab === 'participants');
+  els.tabChat.classList.toggle('active', tab === 'chat');
+  els.paneParticipants.classList.toggle('active', tab === 'participants');
+  els.paneChat.classList.toggle('active', tab === 'chat');
+
+  // Sohbet sekmesine geçince okunmamışları sıfırla ve en alta kaydır
+  if (tab === 'chat') {
+    state.unreadChat = 0;
+    updateChatBadge();
+    // DOM güncellenip scroll yüksekliği hesaplanmadan önce kaydırmayı garantile
+    requestAnimationFrame(scrollChatToBottom);
+    requestAnimationFrame(() => setTimeout(scrollChatToBottom, 50));
+  }
+}
+
+/* Mesaj gönder */
+function sendChat() {
+  if (!state.socket) return;
+  const text = els.chatInput.value;
+  if (!text.trim()) return;
+  state.socket.emit('chat-message', { text });
+  els.chatInput.value = '';
+  els.chatInput.focus();
+}
+
+function enterRoom(room, roomId, messages) {
   showScreen('room');
   els.roomName.textContent = room.name;
   els.roomCode.textContent = '#' + roomId;
   els.participantCount.textContent = room.users.length;
 
-  // Mobilde odaya girince panel kapalı başlasın (video öne çıksın),
-  // masaüstünde açık kalsın. Bu, "sağda koca panel açık kalıp kapanmıyor"
-  // sorununu önler.
-  setPanelOpen(!isMobile());
+  // Odaya girince panel kapalı başlasın (video ön plana çıksın),
+  // isteyen sağ üstteki hamburger menüden açabilir.
+  setPanelOpen(false);
+
+  // Sohbeti sıfırla ve geçmiş mesajları yükle
+  resetChat();
+  if (Array.isArray(messages)) {
+    messages.forEach((m) => appendMessage(m, { silent: true }));
+  }
 
   // davet linki
   const invite = window.location.origin + '/room/' + roomId;
@@ -674,6 +882,9 @@ function enableHostControls(host) {
   els.muteBtn.disabled = !host;
   els.volumeSlider.disabled = !host;
   els.qualitySelect.disabled = !host;
+  if (els.customQualitySelect) {
+    els.customQualitySelect.classList.toggle('disabled', !host);
+  }
   els.liveBtn.disabled = !host;
   // kontroller her zaman görünür (hover) ama izleyicide bilgilendirme var
 }
@@ -814,6 +1025,18 @@ els.qualitySelect.addEventListener('change', () => {
   sendHostCommand({ type: 'quality', value: v });
 });
 
+els.customQualityTrigger.addEventListener('click', (e) => {
+  e.stopPropagation();
+  if (els.customQualitySelect.classList.contains('disabled')) return;
+  els.customQualitySelect.classList.toggle('open');
+});
+
+document.addEventListener('click', (e) => {
+  if (els.customQualitySelect && !els.customQualitySelect.contains(e.target)) {
+    els.customQualitySelect.classList.remove('open');
+  }
+});
+
 // video elementi olayları
 els.video.addEventListener('play', updatePlayIcon);
 els.video.addEventListener('pause', updatePlayIcon);
@@ -887,6 +1110,16 @@ window.addEventListener('resize', () => {
   }
 });
 
+/* ---- Sekmeler (Katılımcılar / Sohbet) ---- */
+els.tabParticipants.addEventListener('click', () => setActiveTab('participants'));
+els.tabChat.addEventListener('click', () => setActiveTab('chat'));
+
+/* ---- Sohbet gönder ---- */
+els.chatForm.addEventListener('submit', (e) => {
+  e.preventDefault();
+  sendChat();
+});
+
 /* ---- Retry (yayın yüklenemedi paneli) ---- */
 if (els.retryBtn) {
   els.retryBtn.addEventListener('click', manualRetry);
@@ -903,9 +1136,11 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
-// Sinema modunda fare hareketi → kontrolleri geçici göster
-document.addEventListener('mousemove', () => {
-  if (state.cinemaMode) resetIdleTimer();
+// Sinema modunda fare hareketi veya dokunma → kontrolleri geçici göster
+['mousemove', 'touchstart'].forEach((evt) => {
+  document.addEventListener(evt, () => {
+    if (state.cinemaMode) resetIdleTimer();
+  }, { passive: true });
 });
 
 els.copyInviteBtn.addEventListener('click', async () => {
